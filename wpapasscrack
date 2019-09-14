@@ -1,0 +1,124 @@
+#!/usr/bin/python3
+#	wpapasscrack - Attempt to crack WPA passphrases of multiple networks
+#	Copyright (C) 2019-2019 Johannes Bauer
+#
+#	This file is part of wpapasscrack.
+#
+#	wpapasscrack is free software; you can redistribute it and/or modify
+#	it under the terms of the GNU General Public License as published by
+#	the Free Software Foundation; this program is ONLY licensed under
+#	version 3 of the License, later versions are explicitly excluded.
+#
+#	wpapasscrack is distributed in the hope that it will be useful,
+#	but WITHOUT ANY WARRANTY; without even the implied warranty of
+#	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#	GNU General Public License for more details.
+#
+#	You should have received a copy of the GNU General Public License
+#	along with wpapasscrack; if not, write to the Free Software
+#	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+#	Johannes Bauer <JohannesBauer@gmx.de>
+
+import re
+import sys
+import subprocess
+import os
+import contextlib
+import json
+import time
+from FriendlyArgumentParser import FriendlyArgumentParser
+
+parser = FriendlyArgumentParser(description = "Attack wireless networks using aircrack-ng/john.")
+parser.add_argument("-d", "--db-filename", metavar = "jsonfile", type = str, default = "cracked.json", help = "Database file in which to store progress. Defaults to %(default)s.")
+parser.add_argument("-w", "--wordlist-dir", metavar = "dirname", type = str, default = "SecLists", help = "Specifies directory in which to find the SecLists word list. Defaults to %(default)s.")
+parser.add_argument("-a", "--aircrack-binary", metavar = "file", type = str, default = "aircrack-ng", help = "Specifies executable of aircrack-ng. Defaults to %(default)s.")
+parser.add_argument("-j", "--john-binary", metavar = "file", type = str, default = "john", help = "Specifies executable of John the Ripper. Defaults to %(default)s.")
+parser.add_argument("-v", "--verbose", action = "count", default = 0, help = "Increases verbosity. Can be specified multiple times to increase.")
+parser.add_argument("capfile", metavar = "capfile", type = str, help = "Capture file to attempt to crack.")
+args = parser.parse_args(sys.argv[1:])
+
+network_re = re.compile(r"\s*(?P<netno>\d+)\s+(?P<bssid>[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2})\s+(?P<essid>\S+)\s+WPA \((?P<handshakes>\d+) handshake")
+network_list = subprocess.check_output([ args.aircrack_binary, args.capfile ], input = b"")
+network_list = network_list.decode().split("\n")
+networks = [ ]
+for line in network_list:
+	match = network_re.match(line)
+	if match is not None:
+		match = match.groupdict()
+		match["handshakes"] = int(match["handshakes"])
+		match["bssid"] = match["bssid"].lower()
+		if match["handshakes"] > 0:
+			networks.append(match)
+		match["cracked"] = False
+		match["netid"] = match["bssid"] + " / " + match["essid"]
+
+def enumerate_attacks():
+	yield { "name": "dictionary", "john": None, "filename": "Passwords/probable-v2-top12000.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "Passwords/WiFi-WPA/probable-v2-wpa-top4800.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "Passwords/darkweb2017-top10000.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "Passwords/Most-Popular-Letter-Passes.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "Passwords/Common-Credentials/10-million-password-list-top-1000000.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "Passwords/xato-net-10-million-passwords-1000000.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "Passwords/openwall.net-all.txt" }
+
+try:
+	with open(args.db_filename) as f:
+		success_db = json.load(f)
+except FileNotFoundError:
+	success_db = { }
+
+def write_db(db, dbfile):
+	with open(dbfile, "w") as f:
+		json.dump(db, fp = f, indent = 4, sort_keys = True)
+		f.write("\n")
+
+if args.verbose >= 1:
+	print("%d networks found for attack, %d PSKs already known." % (len(networks), already_cracked_cnt))
+
+for attack in enumerate_attacks():
+	for network in networks:
+		netid = network["netid"]
+		if netid not in success_db:
+			success_db[netid] = {
+				"essid":		network["essid"],
+				"bssid":		network["bssid"],
+				"run":			[ ],
+				"runtime":		0,
+				"runtimes":		[ ],
+			}
+			write_db(success_db, args.db_filename)
+
+		if "psk" in success_db[netid]:
+			continue
+
+		attack_id = [ attack["name"], attack["john"], attack["filename"] ]
+		if attack_id in success_db[netid]["run"]:
+			continue
+
+		if args.verbose >= 2:
+			print("Running %s attack on %s (%s)" % (attack["name"], network["essid"], network["bssid"]))
+
+		t0 = time.time()
+		with contextlib.suppress(FileNotFoundError):
+			os.unlink("keyfile")
+		if attack["john"] is None:
+			subprocess.check_call([ args.aircrack_binary, "-w", args.wordlist_dir + "/" + attack["filename"], "-l", "keyfile", "-b", network["bssid"], args.capfile ])
+		else:
+			raise NotImplementedError("Combination with John")
+		if os.path.isfile("keyfile"):
+			# Cracked Wifi password
+			with open("keyfile") as f:
+				password = f.read()
+			success_db[netid]["psk"] = password
+			write_db(success_db, args.db_filename)
+			os.unlink("keyfile")
+
+		runtime = time.time() - t0
+		success_db[netid]["runtime"] += runtime
+		success_db[netid]["runtimes"].append({
+			"attack":		attack_id,
+			"time_secs":	runtime,
+		})
+		success_db[netid]["run"].append(attack_id)
+		write_db(success_db, args.db_filename)

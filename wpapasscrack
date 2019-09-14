@@ -39,8 +39,9 @@ parser.add_argument("capfile", metavar = "capfile", type = str, help = "Capture 
 args = parser.parse_args(sys.argv[1:])
 
 network_re = re.compile(r"\s*(?P<netno>\d+)\s+(?P<bssid>[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2}:[A-Fa-f0-9]{2})\s+(?P<essid>\S+)\s+WPA \((?P<handshakes>\d+) handshake")
-network_list = subprocess.check_output([ args.aircrack_binary, args.capfile ], input = b"")
-network_list = network_list.decode().split("\n")
+proc = subprocess.Popen([ args.aircrack_binary, args.capfile ], stdin = subprocess.DEVNULL, stdout = subprocess.PIPE, stderr = subprocess.STDOUT)
+(stdout, stderr) = proc.communicate()
+network_list = stdout.decode().split("\n")
 networks = [ ]
 for line in network_list:
 	match = network_re.match(line)

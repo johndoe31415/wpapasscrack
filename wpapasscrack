@@ -116,7 +116,7 @@ for attack in enumerate_attacks():
 		crack_filename = attack["filename"] % {
 			"seclists":		args.wordlist_dir,
 		}
-		attack_id = [ attack["name"], attack["john"], attack["filename"], hashfile(crack_filename) ]
+		attack_id = [ attack["name"], attack["john"], hashfile(crack_filename) ]
 		if attack_id in success_db[netid]["run"]:
 			continue
 

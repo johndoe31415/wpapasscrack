@@ -27,6 +27,7 @@ import os
 import contextlib
 import json
 import time
+import hashlib
 from FriendlyArgumentParser import FriendlyArgumentParser
 
 parser = FriendlyArgumentParser(description = "Attack wireless networks using aircrack-ng/john.")
@@ -64,6 +65,12 @@ def enumerate_attacks():
 	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt" }
 	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/xato-net-10-million-passwords-1000000.txt" }
 	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/openwall.net-all.txt" }
+	if os.path.isfile("custom.txt"):
+		yield { "name": "dictionary/JtR-KoreLogic", "john": [ "--wordlist=%(filename)s", "--rules:T9" ], "filename": "custom.txt" }
+		yield { "name": "dictionary/JtR-KoreLogic", "john": [ "--wordlist=%(filename)s", "--rules:Extra" ], "filename": "custom.txt" }
+		yield { "name": "dictionary/JtR-KoreLogic", "john": [ "--wordlist=%(filename)s", "--rules:hashcat" ], "filename": "custom.txt" }
+		yield { "name": "dictionary/JtR-KoreLogic", "john": [ "--wordlist=%(filename)s", "--rules:KoreLogic" ], "filename": "custom.txt" }
+		yield { "name": "dictionary/JtR-KoreLogic", "john": [ "--wordlist=%(filename)s", "--rules:Wordlist" ], "filename": "custom.txt" }
 	yield { "name": "dictionary/JtR-Jumbo", "john": [ "--wordlist=%(filename)s", "--rules:Jumbo" ], "filename": "%(seclists)s/Passwords/WiFi-WPA/probable-v2-wpa-top4800.txt" }
 
 try:
@@ -76,6 +83,16 @@ def write_db(db, dbfile):
 	with open(dbfile, "w") as f:
 		json.dump(db, fp = f, indent = 4, sort_keys = True)
 		f.write("\n")
+
+def hashfile(filename):
+	engine = hashlib.md5()
+	with open(filename, "rb") as f:
+		while True:
+			chunk = f.read(1024 * 1024)
+			if len(chunk) == 0:
+				break
+			engine.update(chunk)
+	return engine.hexdigest()
 
 if args.verbose >= 1:
 	print("%d networks found for attack, %d PSKs already known." % (len(networks), already_cracked_cnt))
@@ -96,7 +113,10 @@ for attack in enumerate_attacks():
 		if "psk" in success_db[netid]:
 			continue
 
-		attack_id = [ attack["name"], attack["john"], attack["filename"] ]
+		crack_filename = attack["filename"] % {
+			"seclists":		args.wordlist_dir,
+		}
+		attack_id = [ attack["name"], attack["john"], attack["filename"], hashfile(crack_filename) ]
 		if attack_id in success_db[netid]["run"]:
 			continue
 
@@ -106,9 +126,6 @@ for attack in enumerate_attacks():
 		t0 = time.time()
 		with contextlib.suppress(FileNotFoundError):
 			os.unlink("keyfile")
-		crack_filename = attack["filename"] % {
-			"seclists":		args.wordlist_dir,
-		}
 		if attack["john"] is None:
 			subprocess.check_call([ args.aircrack_binary, "-w", crack_filename, "-l", "keyfile", "-b", network["bssid"], args.capfile ])
 		else:

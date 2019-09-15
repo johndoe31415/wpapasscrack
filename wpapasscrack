@@ -55,13 +55,16 @@ for line in network_list:
 		match["netid"] = match["bssid"] + " / " + match["essid"]
 
 def enumerate_attacks():
-	yield { "name": "dictionary", "john": None, "filename": "Passwords/probable-v2-top12000.txt" }
-	yield { "name": "dictionary", "john": None, "filename": "Passwords/WiFi-WPA/probable-v2-wpa-top4800.txt" }
-	yield { "name": "dictionary", "john": None, "filename": "Passwords/darkweb2017-top10000.txt" }
-	yield { "name": "dictionary", "john": None, "filename": "Passwords/Most-Popular-Letter-Passes.txt" }
-	yield { "name": "dictionary", "john": None, "filename": "Passwords/Common-Credentials/10-million-password-list-top-1000000.txt" }
-	yield { "name": "dictionary", "john": None, "filename": "Passwords/xato-net-10-million-passwords-1000000.txt" }
-	yield { "name": "dictionary", "john": None, "filename": "Passwords/openwall.net-all.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/probable-v2-top12000.txt" }
+	if os.path.isfile("custom.txt"):
+		yield { "name": "dictionary/JtR-Jumbo", "john": [ "--wordlist=%(filename)s", "--rules:Jumbo" ], "filename": "custom.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/WiFi-WPA/probable-v2-wpa-top4800.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/darkweb2017-top10000.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/Most-Popular-Letter-Passes.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/Common-Credentials/10-million-password-list-top-1000000.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/xato-net-10-million-passwords-1000000.txt" }
+	yield { "name": "dictionary", "john": None, "filename": "%(seclists)s/Passwords/openwall.net-all.txt" }
+	yield { "name": "dictionary/JtR-Jumbo", "john": [ "--wordlist=%(filename)s", "--rules:Jumbo" ], "filename": "%(seclists)s/Passwords/WiFi-WPA/probable-v2-wpa-top4800.txt" }
 
 try:
 	with open(args.db_filename) as f:
@@ -103,10 +106,16 @@ for attack in enumerate_attacks():
 		t0 = time.time()
 		with contextlib.suppress(FileNotFoundError):
 			os.unlink("keyfile")
+		crack_filename = attack["filename"] % {
+			"seclists":		args.wordlist_dir,
+		}
 		if attack["john"] is None:
-			subprocess.check_call([ args.aircrack_binary, "-w", args.wordlist_dir + "/" + attack["filename"], "-l", "keyfile", "-b", network["bssid"], args.capfile ])
+			subprocess.check_call([ args.aircrack_binary, "-w", crack_filename, "-l", "keyfile", "-b", network["bssid"], args.capfile ])
 		else:
-			raise NotImplementedError("Combination with John")
+			john_proc = subprocess.Popen([ args.john_binary, "--stdout" ] + [ param % { "filename": crack_filename } for param in attack["john"] ], stdout = subprocess.PIPE)
+			aircrack_proc = subprocess.Popen([ args.aircrack_binary, "-w", "-", "-l", "keyfile", "-b", network["bssid"], args.capfile ], stdin = john_proc.stdout)
+			aircrack_proc.wait()
+			john_proc.wait()
 		if os.path.isfile("keyfile"):
 			# Cracked Wifi password
 			with open("keyfile") as f:

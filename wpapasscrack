@@ -144,8 +144,10 @@ for attack in enumerate_attacks():
 		runtime = time.time() - t0
 		success_db[netid]["runtime"] += runtime
 		success_db[netid]["runtimes"].append({
-			"attack":		attack_id,
-			"time_secs":	runtime,
+			"attack":			attack_id,
+			"time_secs":		runtime,
+			"filename":			attack["filename"],
+			"actual_filename":	crack_filename,
 		})
 		success_db[netid]["run"].append(attack_id)
 		write_db(success_db, args.db_filename)
